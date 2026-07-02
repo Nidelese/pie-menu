@@ -9,10 +9,11 @@ import configparser
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 
-from gi.repository import Gdk, Gtk, GtkLayerShell
+from gi.repository import Gdk, GLib, Gtk, GtkLayerShell
 
 # ── Apps (clockwise from North) ──────────────────────────────────────────────
 APPS = [
@@ -137,47 +138,59 @@ def release_lock():
         pass
 
 
-def get_cursor_and_monitor():
-    """Returns (cx, cy, gdk_monitor) where cx/cy are relative to the monitor."""
+def _hyprland_cursor():
+    """Exact global cursor position via hyprctl (Hyprland only)."""
+    if "HYPRLAND_INSTANCE_SIGNATURE" not in os.environ:
+        return None
     try:
-        cur = subprocess.run(
+        out = subprocess.run(
             ["hyprctl", "cursorpos", "-j"], capture_output=True, text=True, timeout=2
-        )
-        mons = subprocess.run(
-            ["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=2
-        )
-        pos = json.loads(cur.stdout)
-        gx, gy = int(pos["x"]), int(pos["y"])
-
-        display = Gdk.Display.get_default()
-
-        for i, m in enumerate(json.loads(mons.stdout)):
-            mx = m["x"]
-            my = m["y"]
-            mw = m["width"]
-            mh = m["height"]
-            if mx <= gx < mx + mw and my <= gy < my + mh:
-                gdk_mon = display.get_monitor(i)
-                return gx - mx, gy - my, gdk_mon
-
-        # Fallback: first monitor, center
-        return 960, 540, display.get_monitor(0)
+        ).stdout
+        pos = json.loads(out)
+        return int(pos["x"]), int(pos["y"])
     except Exception:
-        display = Gdk.Display.get_default()
-        return 960, 540, display.get_monitor(0)
+        return None
 
 
-class PieMenu(Gtk.Window):
-    def __init__(self, cx, cy, monitor):
+def _kdotool_cursor():
+    """Exact global cursor position on KDE Plasma via kdotool, if installed
+    (an xdotool clone for KWin: https://github.com/jinliu/kdotool)."""
+    if shutil.which("kdotool") is None:
+        return None
+    try:
+        out = subprocess.run(
+            ["kdotool", "getmouselocation", "--shell"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        ).stdout
+        vals = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+        return int(vals["X"]), int(vals["Y"])
+    except Exception:
+        return None
+
+
+def get_global_cursor():
+    """Compositor-specific fast paths; None means the overlays must discover
+    the pointer themselves from enter/motion events after they map."""
+    if os.environ.get("PIE_MENU_GENERIC"):  # force the portable path (debug)
+        return None
+    return _hyprland_cursor() or _kdotool_cursor()
+
+
+class OverlayWindow(Gtk.Window):
+    """Fullscreen layer-shell overlay on one monitor. The monitor the cursor
+    is on hosts the pie; overlays on other monitors stay invisible and only
+    catch clicks/keys so the menu can be dismissed from anywhere."""
+
+    def __init__(self, app, monitor):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
-        self.cx = cx
-        self.cy = cy
-        self.mx = cx
-        self.my = cy
-        self.hovered = -1
-        self.done = False
+        self.app = app
+        self.monitor = monitor
+        self.geo = monitor.get_geometry()
+        self.cx = None  # pie center, set only on the hosting window
+        self.cy = None
 
-        # Layer shell: fullscreen overlay on the monitor where the cursor is
         GtkLayerShell.init_for_window(self)
         GtkLayerShell.set_monitor(self, monitor)
         GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
@@ -202,23 +215,29 @@ class PieMenu(Gtk.Window):
 
         mask = (
             Gdk.EventMask.POINTER_MOTION_MASK
+            | Gdk.EventMask.ENTER_NOTIFY_MASK
             | Gdk.EventMask.BUTTON_RELEASE_MASK
             | Gdk.EventMask.KEY_PRESS_MASK
             | Gdk.EventMask.KEY_RELEASE_MASK
         )
         self.add_events(mask)
-        self.connect("motion-notify-event", self._on_motion)
+        self.connect("enter-notify-event", self._on_pointer)
+        self.connect("motion-notify-event", self._on_pointer)
         self.connect("button-release-event", self._on_button_release)
         self.connect("key-press-event", self._on_key_press)
         self.connect("key-release-event", self._on_key_release)
 
         self.show_all()
 
+    def host_pie(self, x, y):
+        self.cx, self.cy = x, y
+        self.queue_draw()
+
     # ── Interaction ──────────────────────────────────────────────────────────
 
-    def _hovered_slice(self):
-        dx = self.mx - self.cx
-        dy = self.my - self.cy
+    def _hovered_slice(self, mx, my):
+        dx = mx - self.cx
+        dy = my - self.cy
         if math.hypot(dx, dy) < R_INNER:
             return -1
         # atan2 with screen-Y: add π/2 so North=0, clockwise positive;
@@ -226,43 +245,29 @@ class PieMenu(Gtk.Window):
         normalized = (math.atan2(dy, dx) + math.pi / 2 + HALF_SLICE) % (2 * math.pi)
         return int(normalized / SLICE_ANG) % N
 
-    def _on_motion(self, w, ev):
-        self.mx, self.my = ev.x, ev.y
-        h = self._hovered_slice()
-        if h != self.hovered:
-            self.hovered = h
-            self.queue_draw()
+    def _on_pointer(self, w, ev):
+        self.app.pointer_at(self, ev.x, ev.y)
 
     def _on_key_press(self, w, ev):
         if ev.keyval == Gdk.KEY_Escape:
-            self._quit()
+            self.app.quit()
 
     def _on_key_release(self, w, ev):
         if ev.keyval in (Gdk.KEY_Super_L, Gdk.KEY_Super_R):
-            self._launch()
+            self.app.launch()
 
     def _on_button_release(self, w, ev):
         if ev.button == 1:
-            self._launch()
-
-    def _launch(self):
-        if self.done:
-            return
-        self.done = True
-        if self.hovered >= 0:
-            subprocess.Popen(APPS[self.hovered]["cmd"], shell=True)
-        self._quit()
-
-    def _quit(self):
-        self.hide()
-        Gtk.main_quit()
+            self.app.launch()
 
     # ── Drawing ──────────────────────────────────────────────────────────────
 
     def _draw(self, widget, cr):
-        # Transparent base
+        # Transparent base (also the whole frame for non-hosting overlays)
         cr.set_source_rgba(*BG)
         cr.paint()
+        if self.cx is None:
+            return
 
         # Soft dark vignette around pie
         cr.set_source_rgba(*OVERLAY)
@@ -270,7 +275,7 @@ class PieMenu(Gtk.Window):
         cr.fill()
 
         for i, app in enumerate(APPS):
-            hov = i == self.hovered
+            hov = i == self.app.hovered
             center_a = -math.pi / 2 + i * SLICE_ANG
             start_a = center_a - HALF_SLICE + GAP
             end_a = center_a + HALF_SLICE - GAP
@@ -320,8 +325,8 @@ class PieMenu(Gtk.Window):
         # Center: hovered app name, or a drawn sparkle when idle
         # (drawn as a path — fonts can't be trusted to have ✦)
         cr.set_source_rgba(*TEXT_IDLE)
-        if self.hovered >= 0:
-            label = APPS[self.hovered]["name"]
+        if self.app.hovered >= 0:
+            label = APPS[self.app.hovered]["name"]
             cr.select_font_face(FONT, 0, 0)
             cr.set_font_size(11)
             ext = cr.text_extents(label)
@@ -341,12 +346,82 @@ class PieMenu(Gtk.Window):
             cr.fill()
 
 
+class PieApp:
+    def __init__(self):
+        self.owner = None  # overlay window hosting the pie
+        self.hovered = -1
+        self.done = False
+
+        display = Gdk.Display.get_default()
+        self.windows = [
+            OverlayWindow(self, display.get_monitor(i))
+            for i in range(display.get_n_monitors())
+        ]
+
+        pos = get_global_cursor()
+        if pos:
+            gx, gy = pos
+            for w in self.windows:
+                g = w.geo
+                if g.x <= gx < g.x + g.width and g.y <= gy < g.y + g.height:
+                    self._adopt(w, gx - g.x, gy - g.y)
+                    break
+        # Portable path: the overlay under the cursor gets an enter event as
+        # soon as it maps and adopts the pie then. If the compositor sends
+        # nothing at all, open centered on the primary monitor instead.
+        GLib.timeout_add(300, self._fallback_center)
+
+    def _adopt(self, win, x, y):
+        if self.owner is None:
+            self.owner = win
+            win.host_pie(x, y)
+            if os.environ.get("PIE_MENU_DEBUG"):
+                g = win.geo
+                print(
+                    f"pie at +{x},+{y} on monitor {g.width}x{g.height}@{g.x},{g.y}",
+                    flush=True,
+                )
+
+    def _fallback_center(self):
+        if self.owner is None and self.windows:
+            prim = Gdk.Display.get_default().get_primary_monitor()
+            win = next((w for w in self.windows if w.monitor == prim), self.windows[0])
+            self._adopt(win, win.geo.width // 2, win.geo.height // 2)
+        return False  # one-shot timeout
+
+    def pointer_at(self, win, x, y):
+        if self.owner is None:
+            self._adopt(win, x, y)
+            return
+        h = win._hovered_slice(x, y) if win is self.owner else -1
+        if h != self.hovered:
+            self.hovered = h
+            self.owner.queue_draw()
+
+    def launch(self):
+        if self.done:
+            return
+        self.done = True
+        if self.hovered >= 0:
+            subprocess.Popen(APPS[self.hovered]["cmd"], shell=True)
+        self.quit()
+
+    def quit(self):
+        for w in self.windows:
+            w.hide()
+        Gtk.main_quit()
+
+
 def main():
+    if hasattr(GtkLayerShell, "is_supported") and not GtkLayerShell.is_supported():
+        sys.exit(
+            "pie-menu needs a Wayland compositor with layer-shell support "
+            "(Hyprland, sway, KDE Plasma, ...)"
+        )
     if not acquire_lock():
         sys.exit(0)
     try:
-        cx, cy, monitor = get_cursor_and_monitor()
-        PieMenu(cx, cy, monitor)
+        PieApp()
         Gtk.main()
     finally:
         release_lock()

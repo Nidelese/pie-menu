@@ -16,13 +16,20 @@ Two implementations, same look and feel:
 |---|---|---|
 | Stack | Python + GTK3 + gtk-layer-shell + Cairo | AutoHotkey v2 + GDI+ |
 | Trigger | Super+Tab (compositor keybind) | Win+Tab (replaces Task View while running) |
+| Works on | any Wayland compositor with layer-shell: Hyprland, sway/wlroots, KDE Plasma | Windows 10/11 |
 | Tested on | Arch Linux + Hyprland | — |
 
 ## Linux setup
 
-Dependencies (Arch): `python-gobject`, `gtk3`, `gtk-layer-shell`. The script
-reads the cursor position from `hyprctl`, so it currently assumes Hyprland
-(other wlroots compositors work if you swap out `get_cursor_and_monitor`).
+Needs a Wayland compositor that supports the layer-shell protocol — that's
+Hyprland, sway and the other wlroots compositors, and KDE Plasma (KWin).
+X11 sessions are not supported.
+
+Dependencies: GTK3, gtk-layer-shell, and PyGObject:
+
+- Arch: `pacman -S python-gobject gtk3 gtk-layer-shell`
+- Debian/Ubuntu: `apt install python3-gi gir1.2-gtk-3.0 gir1.2-gtklayershell-0.1`
+- Fedora: `dnf install python3-gobject gtk3 gtk-layer-shell`
 
 ```sh
 install -m 755 linux/pie-menu ~/.local/bin/pie-menu
@@ -30,11 +37,19 @@ mkdir -p ~/.config/pie-menu
 cp linux/config.example.ini ~/.config/pie-menu/config.ini   # optional, see Customizing
 ```
 
-Then bind it in your compositor config — Hyprland example:
+Then bind a key to the script in your compositor:
 
-```
-bind = SUPER, Tab, exec, ~/.local/bin/pie-menu
-```
+- **Hyprland**: `bind = SUPER, Tab, exec, ~/.local/bin/pie-menu`
+- **KDE Plasma**: System Settings → Keyboard → Shortcuts → Add New → Command,
+  command `~/.local/bin/pie-menu`, assign Meta+Tab (or whatever you like)
+- **sway**: `bindsym $mod+Tab exec ~/.local/bin/pie-menu`
+
+**How the pie finds your cursor:** on Hyprland it asks `hyprctl` and opens
+exactly at the pointer. On KDE it does the same via
+[kdotool](https://github.com/jinliu/kdotool) if that's installed (recommended,
+it's in the AUR/cargo). Without either, it relies on the compositor reporting
+the pointer to the overlay: the pie appears at the cursor as soon as the
+pointer moves at all, or centered on the primary monitor if it stays still.
 
 ## Windows setup
 
