@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GtkLayerShell", "0.1")
+
+import json
+import math
+import os
+import subprocess
+import sys
+
+from gi.repository import Gdk, Gtk, GtkLayerShell
+
+# ── Apps (clockwise from North) ──────────────────────────────────────────────
+APPS = [
+    {"name": "Firefox", "cmd": "firefox"},
+    {"name": "Obsidian", "cmd": "flatpak run md.obsidian.Obsidian"},
+    {"name": "Krita", "cmd": "krita"},
+    {"name": "Audacity", "cmd": "audacity"},
+    {"name": "Steam", "cmd": "steam"},
+    {"name": "OBS", "cmd": "obs"},
+    {"name": "Kdenlive", "cmd": "kdenlive"},
+    {"name": "lmms", "cmd": "lmms"},
+]
+
+N = len(APPS)
+SLICE_ANG = 2 * math.pi / N  # 45° per slice
+HALF_SLICE = SLICE_ANG / 2
+GAP = 0.025  # radian gap between slice edges
+
+R_INNER = 55
+R_OUTER = 190
+R_TEXT = 132
+
+# ── Palette (pink princess) ──────────────────────────────────────────────────
+BG = (0.118, 0.063, 0.125, 0.0)
+OVERLAY = (0.118, 0.063, 0.125, 0.40)
+SLICE_IDLE = (0.180, 0.094, 0.188, 0.88)
+SLICE_HOV = (0.957, 0.655, 0.765, 0.95)
+BORDER = (0.957, 0.655, 0.765, 0.45)
+BORDER_HOV = (0.957, 0.655, 0.765, 0.90)
+INNER_BG = (0.118, 0.063, 0.125, 0.95)
+TEXT_IDLE = (0.992, 0.910, 0.941, 1.0)
+TEXT_HOV = (0.118, 0.063, 0.125, 1.0)
+
+LOCK_FILE = "/tmp/pie-menu.lock"
+
+
+def acquire_lock():
+    if os.path.exists(LOCK_FILE):
+        try:
+            with open(LOCK_FILE) as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+            return False
+        except (ValueError, ProcessLookupError, PermissionError):
+            pass
+    with open(LOCK_FILE, "w") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+def release_lock():
+    try:
+        os.remove(LOCK_FILE)
+    except FileNotFoundError:
+        pass
+
+
+def get_cursor_and_monitor():
+    """Returns (cx, cy, gdk_monitor) where cx/cy are relative to the monitor."""
+    try:
+        cur = subprocess.run(
+            ["hyprctl", "cursorpos", "-j"], capture_output=True, text=True, timeout=2
+        )
+        mons = subprocess.run(
+            ["hyprctl", "monitors", "-j"], capture_output=True, text=True, timeout=2
+        )
+        pos = json.loads(cur.stdout)
+        gx, gy = int(pos["x"]), int(pos["y"])
+
+        display = Gdk.Display.get_default()
+
+        for i, m in enumerate(json.loads(mons.stdout)):
+            mx = m["x"]
+            my = m["y"]
+            mw = m["width"]
+            mh = m["height"]
+            if mx <= gx < mx + mw and my <= gy < my + mh:
+                gdk_mon = display.get_monitor(i)
+                return gx - mx, gy - my, gdk_mon
+
+        # Fallback: first monitor, center
+        return 960, 540, display.get_monitor(0)
+    except Exception:
+        display = Gdk.Display.get_default()
+        return 960, 540, display.get_monitor(0)
+
+
+class PieMenu(Gtk.Window):
+    def __init__(self, cx, cy, monitor):
+        super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        self.cx = cx
+        self.cy = cy
+        self.mx = cx
+        self.my = cy
+        self.hovered = -1
+        self.done = False
+
+        # Layer shell: fullscreen overlay on the monitor where the cursor is
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_monitor(self, monitor)
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+        for edge in (
+            GtkLayerShell.Edge.TOP,
+            GtkLayerShell.Edge.BOTTOM,
+            GtkLayerShell.Edge.LEFT,
+            GtkLayerShell.Edge.RIGHT,
+        ):
+            GtkLayerShell.set_anchor(self, edge, True)
+
+        # Transparent window
+        self.set_app_paintable(True)
+        visual = self.get_screen().get_rgba_visual()
+        if visual:
+            self.set_visual(visual)
+
+        da = Gtk.DrawingArea()
+        da.connect("draw", self._draw)
+        self.add(da)
+
+        mask = (
+            Gdk.EventMask.POINTER_MOTION_MASK
+            | Gdk.EventMask.BUTTON_RELEASE_MASK
+            | Gdk.EventMask.KEY_PRESS_MASK
+            | Gdk.EventMask.KEY_RELEASE_MASK
+        )
+        self.add_events(mask)
+        self.connect("motion-notify-event", self._on_motion)
+        self.connect("button-release-event", self._on_button_release)
+        self.connect("key-press-event", self._on_key_press)
+        self.connect("key-release-event", self._on_key_release)
+
+        self.show_all()
+
+    # ── Interaction ──────────────────────────────────────────────────────────
+
+    def _hovered_slice(self):
+        dx = self.mx - self.cx
+        dy = self.my - self.cy
+        if math.hypot(dx, dy) < R_INNER:
+            return -1
+        # atan2 with screen-Y: add π/2 so North=0, clockwise positive;
+        # add HALF_SLICE so hit boundaries fall on slice edges, not centers
+        normalized = (math.atan2(dy, dx) + math.pi / 2 + HALF_SLICE) % (2 * math.pi)
+        return int(normalized / SLICE_ANG) % N
+
+    def _on_motion(self, w, ev):
+        self.mx, self.my = ev.x, ev.y
+        h = self._hovered_slice()
+        if h != self.hovered:
+            self.hovered = h
+            self.queue_draw()
+
+    def _on_key_press(self, w, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            self._quit()
+
+    def _on_key_release(self, w, ev):
+        if ev.keyval in (Gdk.KEY_Super_L, Gdk.KEY_Super_R):
+            self._launch()
+
+    def _on_button_release(self, w, ev):
+        if ev.button == 1:
+            self._launch()
+
+    def _launch(self):
+        if self.done:
+            return
+        self.done = True
+        if self.hovered >= 0:
+            subprocess.Popen(APPS[self.hovered]["cmd"], shell=True)
+        self._quit()
+
+    def _quit(self):
+        self.hide()
+        Gtk.main_quit()
+
+    # ── Drawing ──────────────────────────────────────────────────────────────
+
+    def _draw(self, widget, cr):
+        # Transparent base
+        cr.set_source_rgba(*BG)
+        cr.paint()
+
+        # Soft dark vignette around pie
+        cr.set_source_rgba(*OVERLAY)
+        cr.arc(self.cx, self.cy, R_OUTER + 30, 0, 2 * math.pi)
+        cr.fill()
+
+        for i, app in enumerate(APPS):
+            hov = i == self.hovered
+            center_a = -math.pi / 2 + i * SLICE_ANG
+            start_a = center_a - HALF_SLICE + GAP
+            end_a = center_a + HALF_SLICE - GAP
+
+            # Slice fill
+            cr.set_source_rgba(*(SLICE_HOV if hov else SLICE_IDLE))
+            cr.move_to(self.cx, self.cy)
+            cr.arc(self.cx, self.cy, R_OUTER, start_a, end_a)
+            cr.close_path()
+            cr.fill()
+
+            # Slice border
+            cr.set_source_rgba(*(BORDER_HOV if hov else BORDER))
+            cr.set_line_width(1.5)
+            cr.move_to(self.cx, self.cy)
+            cr.arc(self.cx, self.cy, R_OUTER, start_a, end_a)
+            cr.close_path()
+            cr.stroke()
+
+            # Label
+            tx = self.cx + R_TEXT * math.cos(center_a)
+            ty = self.cy + R_TEXT * math.sin(center_a)
+
+            cr.set_source_rgba(*(TEXT_HOV if hov else TEXT_IDLE))
+            cr.select_font_face(
+                "JetBrainsMono Nerd Font",
+                0,  # FONT_SLANT_NORMAL
+                1 if hov else 0,  # FONT_WEIGHT_BOLD / NORMAL
+            )
+            cr.set_font_size(14 if hov else 12)
+            ext = cr.text_extents(app["name"])
+            cr.move_to(
+                tx - ext.width / 2 - ext.x_bearing, ty - ext.height / 2 - ext.y_bearing
+            )
+            cr.show_text(app["name"])
+
+        # Inner circle
+        cr.set_source_rgba(*INNER_BG)
+        cr.arc(self.cx, self.cy, R_INNER, 0, 2 * math.pi)
+        cr.fill()
+
+        cr.set_source_rgba(*BORDER_HOV)
+        cr.set_line_width(2)
+        cr.arc(self.cx, self.cy, R_INNER, 0, 2 * math.pi)
+        cr.stroke()
+
+        # Center label
+        label = APPS[self.hovered]["name"] if self.hovered >= 0 else "✦"
+        cr.set_source_rgba(*TEXT_IDLE)
+        cr.select_font_face("JetBrainsMono Nerd Font", 0, 0)
+        cr.set_font_size(11)
+        ext = cr.text_extents(label)
+        cr.move_to(
+            self.cx - ext.width / 2 - ext.x_bearing,
+            self.cy - ext.height / 2 - ext.y_bearing,
+        )
+        cr.show_text(label)
+
+
+def main():
+    if not acquire_lock():
+        sys.exit(0)
+    try:
+        cx, cy, monitor = get_cursor_and_monitor()
+        PieMenu(cx, cy, monitor)
+        Gtk.main()
+    finally:
+        release_lock()
+
+
+if __name__ == "__main__":
+    main()
