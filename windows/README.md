@@ -7,11 +7,12 @@ your cursor. Move onto a slice, release **Win** (or left-click) to launch.
 ## Setup
 
 1. Install [AutoHotkey v2](https://www.autohotkey.com) (free, tiny).
-2. Open `PieMenu.ahk` in a text editor and fix the app paths in the `Apps`
-   list at the top so they match where your programs are installed.
-   Each entry is `{name: "Label", run: "path or command"}` — you can swap in
-   any apps you like (keep it to 8 for 45° slices, or add/remove entries;
-   the geometry adapts automatically).
+2. Open `pie-menu.ini` (keep it next to `PieMenu.ahk`) in Notepad and make
+   the `[apps]` section match the programs you actually use: one
+   `Name = path-or-command` line per slice, clockwise from the top. Any
+   number of slices works — the angles adapt. The `[colors]` and `[menu]`
+   sections restyle the whole thing (`#RRGGBB` / `#RRGGBBAA` values); every
+   key is optional and the file documents them all.
 3. Double-click `PieMenu.ahk`. A green "H" appears in the system tray —
    the menu is now live on Win+Tab.
 
@@ -33,7 +34,7 @@ AutoHotkey installed.
   the `#Tab::` hotkey line to something else (e.g. `#a::` for Win+A... see
   the [hotkey docs](https://www.autohotkey.com/docs/v2/Hotkeys.htm)).
 - If a slice does nothing and you get a tray notification, the path for
-  that app in the `Apps` list is wrong.
+  that app in `pie-menu.ini` is wrong.
 - The labels use JetBrains Mono if installed, otherwise Segoe UI. If the
   center glyph (✦) shows as a box, replace it in the script with any
   character you like.

@@ -5,6 +5,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 gi.require_version("GtkLayerShell", "0.1")
 
+import configparser
 import json
 import math
 import os
@@ -25,14 +26,12 @@ APPS = [
     {"name": "lmms", "cmd": "lmms"},
 ]
 
-N = len(APPS)
-SLICE_ANG = 2 * math.pi / N  # 45° per slice
-HALF_SLICE = SLICE_ANG / 2
 GAP = 0.025  # radian gap between slice edges
 
 R_INNER = 55
 R_OUTER = 190
 R_TEXT = 132
+FONT = "JetBrainsMono Nerd Font"
 
 # ── Palette (pink princess) ──────────────────────────────────────────────────
 BG = (0.118, 0.063, 0.125, 0.0)
@@ -44,6 +43,75 @@ BORDER_HOV = (0.957, 0.655, 0.765, 0.90)
 INNER_BG = (0.118, 0.063, 0.125, 0.95)
 TEXT_IDLE = (0.992, 0.910, 0.941, 1.0)
 TEXT_HOV = (0.118, 0.063, 0.125, 1.0)
+
+# ── Optional config: ~/.config/pie-menu/config.ini overrides the defaults ────
+
+
+def _parse_color(value, fallback):
+    """#RRGGBB or #RRGGBBAA → rgba tuple; keeps fallback alpha for 6-digit."""
+    s = value.strip().lstrip("#")
+    if len(s) not in (6, 8):
+        return fallback
+    try:
+        r, g, b = (int(s[i : i + 2], 16) / 255 for i in (0, 2, 4))
+        a = int(s[6:8], 16) / 255 if len(s) == 8 else fallback[3]
+    except ValueError:
+        return fallback
+    return (r, g, b, a)
+
+
+def _load_config():
+    global APPS, FONT, R_INNER, R_OUTER, R_TEXT, GAP
+    global OVERLAY, SLICE_IDLE, SLICE_HOV, BORDER, BORDER_HOV
+    global INNER_BG, TEXT_IDLE, TEXT_HOV
+
+    path = os.path.join(
+        os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+        "pie-menu",
+        "config.ini",
+    )
+    if not os.path.isfile(path):
+        return
+    cfg = configparser.ConfigParser()
+    cfg.optionxform = str  # keep app-name capitalization
+    try:
+        cfg.read(path)
+    except configparser.Error:
+        return
+
+    if cfg.has_section("apps"):
+        apps = [{"name": k, "cmd": v} for k, v in cfg["apps"].items() if v.strip()]
+        if apps:
+            APPS = apps
+
+    if cfg.has_section("colors"):
+        c = cfg["colors"]
+        OVERLAY = _parse_color(c.get("overlay", ""), OVERLAY)
+        SLICE_IDLE = _parse_color(c.get("slice", ""), SLICE_IDLE)
+        SLICE_HOV = _parse_color(c.get("slice_hover", ""), SLICE_HOV)
+        BORDER = _parse_color(c.get("border", ""), BORDER)
+        BORDER_HOV = _parse_color(c.get("border_hover", ""), BORDER_HOV)
+        INNER_BG = _parse_color(c.get("center", ""), INNER_BG)
+        TEXT_IDLE = _parse_color(c.get("text", ""), TEXT_IDLE)
+        TEXT_HOV = _parse_color(c.get("text_hover", ""), TEXT_HOV)
+
+    if cfg.has_section("menu"):
+        m = cfg["menu"]
+        try:
+            R_INNER = m.getint("inner_radius", R_INNER)
+            R_OUTER = m.getint("outer_radius", R_OUTER)
+            R_TEXT = m.getint("text_radius", R_TEXT)
+            GAP = math.radians(m.getfloat("gap_degrees", math.degrees(GAP)))
+        except ValueError:
+            pass
+        FONT = m.get("font", FONT).strip() or FONT
+
+
+_load_config()
+
+N = len(APPS)
+SLICE_ANG = 2 * math.pi / N
+HALF_SLICE = SLICE_ANG / 2
 
 LOCK_FILE = "/tmp/pie-menu.lock"
 
@@ -228,7 +296,7 @@ class PieMenu(Gtk.Window):
 
             cr.set_source_rgba(*(TEXT_HOV if hov else TEXT_IDLE))
             cr.select_font_face(
-                "JetBrainsMono Nerd Font",
+                FONT,
                 0,  # FONT_SLANT_NORMAL
                 1 if hov else 0,  # FONT_WEIGHT_BOLD / NORMAL
             )
@@ -252,7 +320,7 @@ class PieMenu(Gtk.Window):
         # Center label
         label = APPS[self.hovered]["name"] if self.hovered >= 0 else "✦"
         cr.set_source_rgba(*TEXT_IDLE)
-        cr.select_font_face("JetBrainsMono Nerd Font", 0, 0)
+        cr.select_font_face(FONT, 0, 0)
         cr.set_font_size(11)
         ext = cr.text_extents(label)
         cr.move_to(

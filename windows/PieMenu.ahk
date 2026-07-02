@@ -26,7 +26,6 @@ R_INNER := 55
 R_OUTER := 190
 R_TEXT  := 132
 GAP_DEG := 1.43              ; gap between slice edges (≈0.025 rad)
-SLICE_DEG := 360 / Apps.Length
 
 ; ══ Palette (pink princess), 0xAARRGGBB ═════════════════════════════════════
 COL_OVERLAY    := 0x281E1020   ; whole-monitor dim (also makes the window clickable everywhere)
@@ -39,6 +38,53 @@ COL_INNER      := 0xF21E1020
 COL_TEXT       := 0xFFFDE8F0
 COL_TEXT_HOV   := 0xFF1E1020
 FONT_CANDIDATES := ["JetBrainsMono Nerd Font", "JetBrains Mono", "Segoe UI"]
+
+; ══ Optional config: pie-menu.ini next to this script ═══════════════════════
+; [apps] name = command (clockwise from North, any count) · [colors] #RRGGBB
+; or #RRGGBBAA · [menu] radii/gap/font. Missing file/keys keep the defaults.
+IniPath := A_ScriptDir "\pie-menu.ini"
+if FileExist(IniPath) {
+    appSection := IniRead(IniPath, "apps", , "")
+    if (appSection != "") {
+        parsed := []
+        for line in StrSplit(appSection, "`n", "`r") {
+            eq := InStr(line, "=")
+            if !eq
+                continue
+            nm := Trim(SubStr(line, 1, eq - 1))
+            cmd := ExpandEnv(Trim(SubStr(line, eq + 1)))
+            if (nm = "" || cmd = "")
+                continue
+            entry := {name: nm, run: cmd}
+            ; full path to a real file → launch from its own folder
+            ; (OBS and friends refuse to start from elsewhere)
+            if (SubStr(cmd, 2, 1) = ":" && FileExist(cmd)) {
+                SplitPath cmd, , &cmdDir
+                entry.dir := cmdDir
+            }
+            parsed.Push(entry)
+        }
+        if parsed.Length
+            Apps := parsed
+    }
+    COL_OVERLAY    := IniColor(IniPath, "overlay", COL_OVERLAY)
+    COL_VIGNETTE   := IniColor(IniPath, "vignette", COL_VIGNETTE)
+    COL_SLICE      := IniColor(IniPath, "slice", COL_SLICE)
+    COL_SLICE_HOV  := IniColor(IniPath, "slice_hover", COL_SLICE_HOV)
+    COL_BORDER     := IniColor(IniPath, "border", COL_BORDER)
+    COL_BORDER_HOV := IniColor(IniPath, "border_hover", COL_BORDER_HOV)
+    COL_INNER      := IniColor(IniPath, "center", COL_INNER)
+    COL_TEXT       := IniColor(IniPath, "text", COL_TEXT)
+    COL_TEXT_HOV   := IniColor(IniPath, "text_hover", COL_TEXT_HOV)
+    R_INNER := Integer(IniRead(IniPath, "menu", "inner_radius", R_INNER))
+    R_OUTER := Integer(IniRead(IniPath, "menu", "outer_radius", R_OUTER))
+    R_TEXT  := Integer(IniRead(IniPath, "menu", "text_radius", R_TEXT))
+    GAP_DEG := Number(IniRead(IniPath, "menu", "gap_degrees", GAP_DEG))
+    fontPref := Trim(IniRead(IniPath, "menu", "font", ""))
+    if (fontPref != "")
+        FONT_CANDIDATES.InsertAt(1, fontPref)
+}
+SLICE_DEG := 360 / Apps.Length
 
 ; ══ GDI+ startup ════════════════════════════════════════════════════════════
 GdipToken := 0
@@ -252,4 +298,21 @@ Atan2Deg(y, x) {
     if (x = 0 && y = 0)
         return 0
     return DllCall("msvcrt\atan2", "Double", y, "Double", x, "Cdecl Double") * 57.29577951308232
+}
+
+IniColor(path, key, fallback) {
+    v := StrReplace(Trim(IniRead(path, "colors", key, "")), "#")
+    if !RegExMatch(v, "i)^[0-9a-f]{6}([0-9a-f]{2})?$")
+        return fallback
+    rgb := Integer("0x" SubStr(v, 1, 6))
+    a := StrLen(v) = 8 ? Integer("0x" SubStr(v, 7, 2)) : (fallback >> 24) & 0xFF
+    return (a << 24) | rgb
+}
+
+ExpandEnv(s) {
+    if !InStr(s, "%")
+        return s
+    buf := Buffer(4096)
+    DllCall("ExpandEnvironmentStringsW", "WStr", s, "Ptr", buf, "UInt", 2048)
+    return StrGet(buf)
 }

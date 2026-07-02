@@ -21,6 +21,8 @@ reads the cursor position from `hyprctl`, so it currently assumes Hyprland
 
 ```sh
 install -m 755 linux/pie-menu ~/.local/bin/pie-menu
+mkdir -p ~/.config/pie-menu
+cp linux/config.example.ini ~/.config/pie-menu/config.ini   # optional, see Customizing
 ```
 
 Then bind it in your compositor config — Hyprland example:
@@ -32,18 +34,30 @@ bind = SUPER, Tab, exec, ~/.local/bin/pie-menu
 ## Windows setup
 
 See [`windows/README.md`](windows/README.md) — short version: install
-[AutoHotkey v2](https://www.autohotkey.com), fix the app paths at the top of
-`PieMenu.ahk`, double-click it.
+[AutoHotkey v2](https://www.autohotkey.com), fix the app paths in
+`pie-menu.ini`, double-click `PieMenu.ahk`.
 
 ## Customizing
 
-Both scripts keep the knobs at the top of the file:
+No code editing needed — both versions read the same INI config format:
 
-- **Apps** — the `APPS` / `Apps` list, clockwise from North. Any count works;
-  slice angles adapt.
-- **Palette** — pink princess by default (`#f4a7c3` pink, `#fde8f0` blush,
-  `#1e1020` plum). Recolor freely.
-- **Geometry** — inner/outer radius, label ring, gap between slices.
+| | Config location |
+|---|---|
+| Linux | `~/.config/pie-menu/config.ini` ([example](linux/config.example.ini)) |
+| Windows | `pie-menu.ini` next to the script |
+
+Three sections, all optional (missing file or keys = built-in defaults):
+
+- **`[apps]`** — `Display Name = command`, one per slice, clockwise from the
+  top. Put *your* programs here — any number of slices works, the angles
+  adapt automatically.
+- **`[colors]`** — `#RRGGBB` or `#RRGGBBAA` for every element (slices, hover,
+  borders, text, center, overlay). Pink princess by default (`#f4a7c3` pink,
+  `#fde8f0` blush, `#1e1020` plum), but it's your pie: gothify, nordify,
+  gruvboxify at will.
+- **`[menu]`** — radii, gap between slices, font.
+
+The example configs are fully commented and list every key with its default.
 
 ## License
 
