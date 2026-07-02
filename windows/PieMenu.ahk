@@ -254,7 +254,10 @@ Redraw() {
     DllCall("gdiplus\GdipDrawEllipse", "Ptr", pG, "Ptr", p, "Float", Cx - R_INNER, "Float", Cy - R_INNER, "Float", R_INNER * 2, "Float", R_INNER * 2)
     DllCall("gdiplus\GdipDeletePen", "Ptr", p)
 
-    DrawLabel(Hovered >= 0 ? Apps[Hovered + 1].name : "✦", Cx, Cy, 11, false, COL_TEXT)
+    if (Hovered >= 0)
+        DrawLabel(Apps[Hovered + 1].name, Cx, Cy, 11, false, COL_TEXT)
+    else
+        DrawSparkle(Cx, Cy, 9, 3, COL_TEXT)  ; drawn shape — fonts can't be trusted to have ✦
 
     ; push the frame to screen
     pt := Buffer(8), sz := Buffer(8), src := Buffer(8, 0), bf := Buffer(4, 0)
@@ -292,6 +295,20 @@ NewPen(argb, width) {
     p := 0
     DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", width, "Int", 2, "Ptr*", &p)
     return p
+}
+
+DrawSparkle(x, y, r, ri, argb) {
+    pts := Buffer(8 * 8)  ; 8 PointF: 4-point star, alternating outer/inner radius
+    loop 8 {
+        k := A_Index - 1
+        rad := Mod(k, 2) = 0 ? r : ri
+        ang := -1.5707963267948966 + k * 0.7853981633974483
+        NumPut("Float", x + rad * Cos(ang), pts, k * 8)
+        NumPut("Float", y + rad * Sin(ang), pts, k * 8 + 4)
+    }
+    b := NewBrush(argb)
+    DllCall("gdiplus\GdipFillPolygon", "Ptr", pG, "Ptr", b, "Ptr", pts, "Int", 8, "Int", 0)
+    DllCall("gdiplus\GdipDeleteBrush", "Ptr", b)
 }
 
 Atan2Deg(y, x) {

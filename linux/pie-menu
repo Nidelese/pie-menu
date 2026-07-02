@@ -317,17 +317,28 @@ class PieMenu(Gtk.Window):
         cr.arc(self.cx, self.cy, R_INNER, 0, 2 * math.pi)
         cr.stroke()
 
-        # Center label
-        label = APPS[self.hovered]["name"] if self.hovered >= 0 else "✦"
+        # Center: hovered app name, or a drawn sparkle when idle
+        # (drawn as a path — fonts can't be trusted to have ✦)
         cr.set_source_rgba(*TEXT_IDLE)
-        cr.select_font_face(FONT, 0, 0)
-        cr.set_font_size(11)
-        ext = cr.text_extents(label)
-        cr.move_to(
-            self.cx - ext.width / 2 - ext.x_bearing,
-            self.cy - ext.height / 2 - ext.y_bearing,
-        )
-        cr.show_text(label)
+        if self.hovered >= 0:
+            label = APPS[self.hovered]["name"]
+            cr.select_font_face(FONT, 0, 0)
+            cr.set_font_size(11)
+            ext = cr.text_extents(label)
+            cr.move_to(
+                self.cx - ext.width / 2 - ext.x_bearing,
+                self.cy - ext.height / 2 - ext.y_bearing,
+            )
+            cr.show_text(label)
+        else:
+            for k in range(8):  # 4-point star: alternate outer/inner radius
+                rad = 9 if k % 2 == 0 else 3
+                ang = -math.pi / 2 + k * math.pi / 4
+                x = self.cx + rad * math.cos(ang)
+                y = self.cy + rad * math.sin(ang)
+                (cr.move_to if k == 0 else cr.line_to)(x, y)
+            cr.close_path()
+            cr.fill()
 
 
 def main():

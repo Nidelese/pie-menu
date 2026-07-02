@@ -35,6 +35,5 @@ AutoHotkey installed.
   the [hotkey docs](https://www.autohotkey.com/docs/v2/Hotkeys.htm)).
 - If a slice does nothing and you get a tray notification, the path for
   that app in `pie-menu.ini` is wrong.
-- The labels use JetBrains Mono if installed, otherwise Segoe UI. If the
-  center glyph (✦) shows as a box, replace it in the script with any
-  character you like.
+- The labels use JetBrains Mono if installed, otherwise Segoe UI (or set
+  `font` in `pie-menu.ini`).

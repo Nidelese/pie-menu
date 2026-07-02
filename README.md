@@ -1,5 +1,10 @@
 # pie-menu ✦
 
+<p align="center">
+  <img src="assets/pie-menu.png" width="420"
+       alt="Pie menu open over a desktop: eight dark slices with app names around a sparkle center, pink borders">
+</p>
+
 A pink princess radial app launcher. Hold <kbd>Super</kbd>, tap <kbd>Tab</kbd> →
 a pie of eight app slices blooms at your cursor. Glide onto a slice, release
 <kbd>Super</kbd> (or click) to launch. <kbd>Esc</kbd> cancels. Multi-monitor
