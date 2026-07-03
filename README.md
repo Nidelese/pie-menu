@@ -6,11 +6,6 @@
 </p>
 
 
-<p align="center">
-  <img src="assets/Pie_Moonfly.png" width="420"
-       alt="Pie menu open over a desktop: 7 slices over a blue color scheme on windows 10. ">
-</p>
-
 
 
 A pink princess radial app launcher. Hold <kbd>Super</kbd>, tap <kbd>Tab</kbd> →
