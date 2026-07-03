@@ -17,7 +17,7 @@ Two implementations, same look and feel:
 | Stack | Python + GTK3 + gtk-layer-shell + Cairo | AutoHotkey v2 + GDI+ |
 | Trigger | Super+Tab (compositor keybind) | Win+Tab (replaces Task View while running) |
 | Works on | any Wayland compositor with layer-shell: Hyprland, sway/wlroots, KDE Plasma | Windows 10/11 |
-| Tested on | Arch Linux + Hyprland | — |
+| Tested on | Arch Linux + Hyprland | Windows 10 |
 
 ## Linux setup
 
