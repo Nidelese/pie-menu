@@ -5,6 +5,14 @@
        alt="Pie menu open over a desktop: eight dark slices with app names around a sparkle center, pink borders">
 </p>
 
+
+<p align="center">
+  <img src="assets/Pie_Moonfly.png" width="420"
+       alt="Pie menu open over a desktop: 7 slices over a blue color scheme on windows 10. ">
+</p>
+
+
+
 A pink princess radial app launcher. Hold <kbd>Super</kbd>, tap <kbd>Tab</kbd> →
 a pie of eight app slices blooms at your cursor. Glide onto a slice, release
 <kbd>Super</kbd> (or click) to launch. <kbd>Esc</kbd> cancels. Multi-monitor
